@@ -10,13 +10,15 @@
 
 ARG ALPINE_VERSION=3.24
 ARG CONTAINER_BASE_TAG=2026.7.0
-ARG DB_BACKUP_TAG=4.9.0
+ARG DB_BACKUP_TAG=4.9.1
+ARG BUILD_REVISION=1
 
 FROM alpine:${ALPINE_VERSION}
 
 ARG ALPINE_VERSION
 ARG CONTAINER_BASE_TAG
 ARG DB_BACKUP_TAG
+ARG BUILD_REVISION
 ARG IMAGE_BASE_MODULES="+age,+cron,+logrotate,+fail2ban,+s6overlay,+msmtp,"
 ARG IMAGE_MODULES=""
 ARG IMAGE_BASE_VERSION="${ALPINE_VERSION}"
@@ -46,6 +48,7 @@ ENV PATH="${PATH}:/usr/local/sbin:/usr/local/bin:/usr/local/lib:/usr/sbin:/usr/b
 # -----------------------------------------------------------------------------
 
 RUN set -eux; \
+    echo "Build revision: r${BUILD_REVISION}"; \
     apk add --no-cache bash ca-certificates git; \
     git clone --depth 1 --branch "${CONTAINER_BASE_TAG}" \
         https://github.com/nfrastack/container-base.git \
@@ -142,6 +145,7 @@ ENV CONTAINER_ENABLE_SCHEDULING=TRUE \
     IMAGE_REPO_URL="https://github.com/nfrastack/container-db-backup/"
 
 RUN set -eux; \
+    echo "Build revision: r${BUILD_REVISION}"; \
     git clone --depth 1 --branch "${DB_BACKUP_TAG}" \
         https://github.com/nfrastack/container-db-backup.git \
         /usr/src/container-db-backup; \
@@ -235,54 +239,7 @@ RUN echo "" && \
 # The upstream runtime rootfs is copied after the package build. It is staged
 # outside /usr/src because the upstream cleanup removes /usr/src/*.
 
-# Temporary downstream patch for nfrastack/container-db-backup 4.9.0:
-# Oracle MySQL clients reject --skip-ssl and require --ssl-mode=DISABLED.
 RUN set -eux; \
-    python3 - <<'PY'
-from pathlib import Path
-import re
-
-path = Path("/build-context/db-rootfs/container/functions/10-dbbackup")
-content = path.read_text()
-
-pattern = re.compile(
-    r'(?m)^(?P<indent>[ \t]*)mysql_tls_args="--skip-ssl"[ \t]*$'
-)
-
-matches = list(pattern.finditer(content))
-
-if len(matches) != 1:
-    raise RuntimeError(
-        f"Expected exactly one mysql_tls_args --skip-ssl assignment, "
-        f"found {len(matches)} in {path}"
-    )
-
-indent = matches[0].group("indent")
-
-replacement = "\n".join([
-    f'{indent}case "${{backup_job_mysql_client,,}}" in',
-    f'{indent}    mariadb )',
-    f'{indent}        mysql_tls_args="--skip-ssl"',
-    f'{indent}    ;;',
-    f'{indent}    mysql )',
-    f'{indent}        mysql_tls_args="--ssl-mode=DISABLED"',
-    f'{indent}    ;;',
-    f'{indent}esac',
-])
-
-content, replacements = pattern.subn(replacement, content)
-
-if replacements != 1:
-    raise RuntimeError(f"Patch unexpectedly made {replacements} replacements")
-
-path.write_text(content)
-PY
-
-RUN set -eux; \
-    grep -F 'mysql_tls_args="--ssl-mode=DISABLED"' \
-        /build-context/db-rootfs/container/functions/10-dbbackup; \
-    grep -F 'mysql_tls_args="--skip-ssl"' \
-        /build-context/db-rootfs/container/functions/10-dbbackup; \
     cp -a /build-context/db-rootfs/. /; \
     rm -rf /build-context
 

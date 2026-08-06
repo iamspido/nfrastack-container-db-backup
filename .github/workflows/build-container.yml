@@ -25,6 +25,8 @@ jobs:
       image: ${{ steps.vars.outputs.image }}
       container_base_tag: ${{ steps.vars.outputs.container_base_tag }}
       db_backup_tag: ${{ steps.vars.outputs.db_backup_tag }}
+      build_revision: ${{ steps.vars.outputs.build_revision }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -37,13 +39,16 @@ jobs:
 
           container_base_tag="$(grep -m1 '^ARG CONTAINER_BASE_TAG=' Dockerfile | cut -d= -f2- | tr -d '"')"
           db_backup_tag="$(grep -m1 '^ARG DB_BACKUP_TAG=' Dockerfile | cut -d= -f2- | tr -d '"')"
+          build_revision="$(grep -m1 '^ARG BUILD_REVISION=' Dockerfile | cut -d= -f2- | tr -d '"')"
 
           test -n "${container_base_tag}"
           test -n "${db_backup_tag}"
+          test -n "${build_revision}"
 
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "${GITHUB_OUTPUT}"
           echo "container_base_tag=${container_base_tag}" >> "${GITHUB_OUTPUT}"
           echo "db_backup_tag=${db_backup_tag}" >> "${GITHUB_OUTPUT}"
+          echo "build_revision=${build_revision}" >> "${GITHUB_OUTPUT}"
 
   build-amd64:
     name: Build AMD64
@@ -51,6 +56,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -88,6 +94,7 @@ jobs:
           build-args: |
             CONTAINER_BASE_TAG=${{ needs.prepare.outputs.container_base_tag }}
             DB_BACKUP_TAG=${{ needs.prepare.outputs.db_backup_tag }}
+            BUILD_REVISION=${{ needs.prepare.outputs.build_revision }}
             SOURCE_REPOSITORY=https://github.com/${{ github.repository }}
             VCS_REF=${{ github.sha }}
           cache-from: type=gha,scope=nfrastack-db-backup-amd64
@@ -101,6 +108,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -138,6 +146,7 @@ jobs:
           build-args: |
             CONTAINER_BASE_TAG=${{ needs.prepare.outputs.container_base_tag }}
             DB_BACKUP_TAG=${{ needs.prepare.outputs.db_backup_tag }}
+            BUILD_REVISION=${{ needs.prepare.outputs.build_revision }}
             SOURCE_REPOSITORY=https://github.com/${{ github.repository }}
             VCS_REF=${{ github.sha }}
           cache-from: type=gha,scope=nfrastack-db-backup-arm64
@@ -152,6 +161,7 @@ jobs:
       - build-amd64
       - build-arm64
     runs-on: ubuntu-24.04
+
     steps:
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -168,6 +178,7 @@ jobs:
           IMAGE: ${{ needs.prepare.outputs.image }}
           CONTAINER_BASE_TAG: ${{ needs.prepare.outputs.container_base_tag }}
           DB_BACKUP_TAG: ${{ needs.prepare.outputs.db_backup_tag }}
+          BUILD_REVISION: ${{ needs.prepare.outputs.build_revision }}
           AMD64_DIGEST: ${{ needs.build-amd64.outputs.digest }}
           ARM64_DIGEST: ${{ needs.build-arm64.outputs.digest }}
         shell: bash
@@ -178,12 +189,80 @@ jobs:
             --tag "${IMAGE}:latest" \
             --tag "${IMAGE}:${DB_BACKUP_TAG}" \
             --tag "${IMAGE}:${DB_BACKUP_TAG}-base-${CONTAINER_BASE_TAG}" \
+            --tag "${IMAGE}:${DB_BACKUP_TAG}-base-${CONTAINER_BASE_TAG}-r${BUILD_REVISION}" \
             "${IMAGE}@${AMD64_DIGEST}" \
             "${IMAGE}@${ARM64_DIGEST}"
 
       - name: Inspect published image
         env:
           IMAGE: ${{ needs.prepare.outputs.image }}
+          CONTAINER_BASE_TAG: ${{ needs.prepare.outputs.container_base_tag }}
           DB_BACKUP_TAG: ${{ needs.prepare.outputs.db_backup_tag }}
+          BUILD_REVISION: ${{ needs.prepare.outputs.build_revision }}
         shell: bash
-        run: docker buildx imagetools inspect "${IMAGE}:${DB_BACKUP_TAG}"
+        run: |
+          docker buildx imagetools inspect \
+            "${IMAGE}:${DB_BACKUP_TAG}-base-${CONTAINER_BASE_TAG}-r${BUILD_REVISION}"
+
+  release:
+    name: Create GitHub release
+    needs:
+      - prepare
+      - publish-manifest
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ needs.prepare.outputs.image }}
+          CONTAINER_BASE_TAG: ${{ needs.prepare.outputs.container_base_tag }}
+          DB_BACKUP_TAG: ${{ needs.prepare.outputs.db_backup_tag }}
+          BUILD_REVISION: ${{ needs.prepare.outputs.build_revision }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_tag="${DB_BACKUP_TAG}-base-${CONTAINER_BASE_TAG}-r${BUILD_REVISION}"
+
+          if gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${release_tag}" \
+            >/dev/null 2>&1; then
+            echo "::error::Git tag ${release_tag} already exists."
+            echo "::error::Increment BUILD_REVISION before publishing a different build."
+            exit 1
+          fi
+
+          cat > release-notes.md <<EOF
+          Unofficial source build of nfrastack/container-db-backup ${DB_BACKUP_TAG}.
+
+          Upstream versions:
+
+          - container-db-backup: ${DB_BACKUP_TAG}
+          - container-base: ${CONTAINER_BASE_TAG}
+          - build revision: r${BUILD_REVISION}
+
+          Container images:
+
+          \`\`\`
+          ${IMAGE}:${DB_BACKUP_TAG}-base-${CONTAINER_BASE_TAG}-r${BUILD_REVISION}
+          ${IMAGE}:${DB_BACKUP_TAG}-base-${CONTAINER_BASE_TAG}
+          ${IMAGE}:${DB_BACKUP_TAG}
+          ${IMAGE}:latest
+          \`\`\`
+
+          Architectures:
+
+          - linux/amd64
+          - linux/arm64
+          EOF
+
+          gh release create "${release_tag}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "container-db-backup ${DB_BACKUP_TAG} (base ${CONTAINER_BASE_TAG}, r${BUILD_REVISION})" \
+            --notes-file release-notes.md
