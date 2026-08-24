@@ -40,7 +40,7 @@ resulting files under `./backups`:
 ```yaml
 services:
   db-backup:
-    image: ghcr.io/iamspido/nfrastack-container-db-backup:4.9.1
+    image: ghcr.io/iamspido/nfrastack-container-db-backup:4.9.2
     container_name: db-backup
     restart: unless-stopped
 
@@ -130,15 +130,15 @@ Blob Storage.
 
 For the complete configuration reference, scheduling options, encryption,
 notifications, hooks and restore documentation, use the
-[upstream README](https://github.com/nfrastack/container-db-backup/tree/4.9.1#readme).
+[upstream README](https://github.com/nfrastack/container-db-backup/tree/4.9.2#readme).
 
 ## Image tags
 
 | Tag | Description |
 | --- | --- |
 | `latest` | Current version pinned by this repository |
-| `4.9.1` | Pinned `container-db-backup` release |
-| `4.9.1-base-2026.7.0` | Pinned application and base releases |
+| `4.9.2` | Pinned `container-db-backup` release |
+| `4.9.2-base-2026.7.0` | Pinned application and base releases |
 
 Published platforms:
 
@@ -154,7 +154,7 @@ The versions are defined at the top of the `Dockerfile`:
 
 ```dockerfile
 ARG CONTAINER_BASE_TAG=2026.7.0
-ARG DB_BACKUP_TAG=4.9.1
+ARG DB_BACKUP_TAG=4.9.2
 ```
 
 The GitHub Actions workflow builds both architectures on native hosted runners,
