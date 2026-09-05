@@ -5,6 +5,20 @@
 [![Platforms](https://img.shields.io/badge/platform-linux%2Famd64%20%7C%20linux%2Farm64-lightgrey)](#image-tags)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
+## Repository Archived
+
+With the release of version `5.0.0`, the upstream project has received a **complete rewrite**.
+
+Most importantly, upstream now once again supports up to **99 backup jobs (`DB01`–`DB99`)**.
+
+This repository was originally created because the upstream project no longer supported larger multi-database setups. Maintaining this separate repository was therefore necessary to keep support for a high number of backup jobs.
+
+With version `5.0.0`, this limitation has been removed and the original reason for this repository no longer exists.
+
+For that reason, **this repository is now archived and will no longer be maintained**.
+
+Please use the upstream project for all future deployments, updates, bug fixes, and support.
+
 Unofficial multi-architecture build of
 [`nfrastack/container-db-backup`](https://github.com/nfrastack/container-db-backup),
 published to GitHub Container Registry for AMD64 and ARM64.
